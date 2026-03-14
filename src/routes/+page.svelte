@@ -304,14 +304,27 @@
 										</button>
 
 										{#if expandedDomains[domainKey]}
+											{#if domain.domainDescription}
+												<div class="ml-8 mt-1 mb-2 px-3 py-2 bg-purple-50 rounded-lg border border-purple-100">
+													<p class="text-xs text-purple-800">{domain.domainDescription}</p>
+													{#if domain.implementationOrder}
+														<p class="text-xs text-purple-600 mt-1 font-medium">📋 {domain.implementationOrder}</p>
+													{/if}
+												</div>
+											{/if}
 											<div class="ml-8 space-y-0.5">
 												{#each domain.devFeatures as feature}
-													<div class="flex items-center gap-2 py-1 px-3 rounded text-sm">
-														<span class="text-xs">{statusIcon(feature.statusBack)}</span>
-														<CheckSquare class="w-3 h-3 text-gray-300" />
-														<span class="text-gray-600">{feature.name}</span>
+													<div class="group py-1.5 px-3 rounded hover:bg-gray-50 transition-colors">
+														<div class="flex items-center gap-2 text-sm">
+															<span class="text-xs">{statusIcon(feature.statusBack)}</span>
+															<CheckSquare class="w-3 h-3 text-gray-300" />
+															<span class="text-gray-700 font-medium">{feature.name}</span>
+														</div>
 														{#if feature.description}
-															<span class="text-xs text-gray-400 truncate ml-auto max-w-xs">{feature.description}</span>
+															<p class="ml-7 text-xs text-gray-500 mt-0.5">{feature.description}</p>
+														{/if}
+														{#if feature.acceptance}
+															<p class="ml-7 text-xs text-green-600 mt-0.5 whitespace-pre-line">✅ {feature.acceptance}</p>
 														{/if}
 													</div>
 												{/each}
