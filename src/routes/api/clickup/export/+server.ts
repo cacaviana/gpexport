@@ -42,67 +42,108 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	const log: string[] = [];
 	try {
-		// 1. Create Space
+		// 1. Create Space (= Project)
 		const space = await clickupFetch(`/team/${teamId}/space`, 'POST', {
 			name: data.projectName,
 			multiple_assignees: true,
 			features: {
 				due_dates: { enabled: true, start_date: false, remap_due_dates: false, remap_closed_due_date: false },
-				checklists: { enabled: true }
+				checklists: { enabled: true },
+				tags: { enabled: true }
 			}
 		});
 		log.push(`✅ Space "${data.projectName}" criado (id: ${space.id})`);
 
-		// 2. For each level: create Folder
+		// 2. Flatten: collect all domains across levels (domain-oriented, not level-oriented)
+		// Each domain becomes a Folder (dossier). Level becomes a tag on the task.
+		const allDomains: { domain: any; levelNum: number; levelName: string }[] = [];
 		for (const level of data.levels) {
-			const folder = await clickupFetch(`/space/${space.id}/folder`, 'POST', {
-				name: level.name
-			});
-			log.push(`✅ Folder "${level.name}" criado`);
-
-			// 3. For each domain: create List
 			for (const domain of level.domains) {
-				const list = await clickupFetch(`/folder/${folder.id}/list`, 'POST', {
-					name: `${domain.name} (${domain.totalFeatures || domain.devFeatures.length} tasks)`
-				});
-				log.push(`  📋 List "${domain.name}" criado`);
-
-				// 4. For each dev feature: create Task
-				for (const feature of domain.devFeatures) {
-					const taskBody: any = {
-						name: feature.name,
-						description: feature.description || '',
-						status: STATUS_MAP[feature.statusBack] || 'to do'
-					};
-
-					if (feature.dependsOn && feature.dependsOn.length > 0) {
-						taskBody.description += `\n\nDepende de: ${feature.dependsOn.join(', ')}`;
-					}
-
-					const task = await clickupFetch(`/list/${list.id}/task`, 'POST', taskBody);
-
-					// 5. Create checklist with Back/Front/QA
-					const checklist = await clickupFetch(`/task/${task.id}/checklist`, 'POST', {
-						name: 'Camadas'
-					});
-
-					const layers = [
-						{ name: 'Back', status: feature.statusBack },
-						{ name: 'Front', status: feature.statusFront },
-						{ name: 'QA', status: feature.statusQA }
-					];
-					for (const layer of layers) {
-						await clickupFetch(`/checklist/${checklist.checklist.id}/checklist_item`, 'POST', {
-							name: `${layer.name}`,
-							resolved: layer.status === 'done'
-						});
-					}
-
-					const statusEmoji = feature.statusBack === 'done' ? '✅' : feature.statusBack === 'blocked' ? '🔴' : '⬜';
-					log.push(`    ${statusEmoji} Task "${feature.name}"`);
-				}
+				allDomains.push({ domain, levelNum: level.level, levelName: level.name });
 			}
 		}
+
+		// 3. Create tags for levels on the space
+		const levelTags: Record<number, string> = {};
+		const tagColors = ['#7c3aed', '#2563eb', '#059669', '#d97706', '#dc2626'];
+		for (const level of data.levels) {
+			const tagName = `Nível ${level.level}`;
+			try {
+				await clickupFetch(`/space/${space.id}/tag`, 'POST', {
+					tag: { name: tagName, tag_bg: tagColors[level.level - 1] || '#6b7280', tag_fg: '#ffffff' }
+				});
+				levelTags[level.level] = tagName;
+				log.push(`🏷️ Tag "${tagName}" criada`);
+			} catch {
+				levelTags[level.level] = tagName;
+			}
+		}
+
+		// 4. For each domain: create Folder (= dossier)
+		for (const { domain, levelNum, levelName } of allDomains) {
+			const folderName = domain.name;
+			const folder = await clickupFetch(`/space/${space.id}/folder`, 'POST', {
+				name: folderName
+			});
+			log.push(`📂 Domínio "${folderName}" criado`);
+
+			// 5. Create a single List "Backlog" inside the Folder
+			const featureCount = domain.devFeatures?.length || domain.totalFeatures || 0;
+			const list = await clickupFetch(`/folder/${folder.id}/list`, 'POST', {
+				name: `Backlog (${featureCount} tasks)`
+			});
+			log.push(`  📋 List "Backlog" criado`);
+
+			// 6. For each dev feature: create Task
+			for (const feature of domain.devFeatures) {
+				// Build description with metadata
+				let description = feature.description || '';
+				const meta: string[] = [];
+				meta.push(`Nível: ${levelNum} — ${levelName}`);
+				if (domain.dependsOn && domain.dependsOn.length > 0) {
+					meta.push(`Domínio depende de: ${domain.dependsOn.join(', ')}`);
+				}
+				if (feature.dependsOn && feature.dependsOn.length > 0) {
+					meta.push(`Dev feature depende de: ${feature.dependsOn.join(', ')}`);
+				}
+				if (meta.length > 0) {
+					description += '\n\n---\n' + meta.join('\n');
+				}
+
+				const taskBody: any = {
+					name: feature.name,
+					description,
+					status: STATUS_MAP[feature.statusBack] || 'to do',
+					tags: [levelTags[levelNum]].filter(Boolean)
+				};
+
+				const task = await clickupFetch(`/list/${list.id}/task`, 'POST', taskBody);
+
+				// 7. Create checklist "Camadas" with Back/Front/QA
+				const checklist = await clickupFetch(`/task/${task.id}/checklist`, 'POST', {
+					name: 'Camadas'
+				});
+
+				const layers = [
+					{ name: 'Back', status: feature.statusBack },
+					{ name: 'Front', status: feature.statusFront },
+					{ name: 'QA', status: feature.statusQA }
+				];
+				for (const layer of layers) {
+					await clickupFetch(`/checklist/${checklist.checklist.id}/checklist_item`, 'POST', {
+						name: layer.name,
+						resolved: layer.status === 'done'
+					});
+				}
+
+				const statusEmoji = feature.statusBack === 'done' ? '✅' : feature.statusBack === 'blocked' ? '🔴' : '⬜';
+				log.push(`    ${statusEmoji} ${feature.name}`);
+			}
+		}
+
+		const totalTasks = allDomains.reduce((s, d) => s + (d.domain.devFeatures?.length || 0), 0);
+		log.push('');
+		log.push(`🎯 Resumo: ${allDomains.length} domínios, ${totalTasks} tasks criadas`);
 
 		return json({ ok: true, log });
 	} catch (e: any) {
