@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Upload, ChevronRight, ChevronDown, FolderOpen, List, CheckSquare, Send, Loader2, FileText, Trash2, Code, Eye } from 'lucide-svelte';
+	import { Upload, ChevronRight, ChevronDown, FolderOpen, List, CheckSquare, Send, Loader2, FileText, Trash2, Code, Eye, Plus, FolderSync } from 'lucide-svelte';
 
 	let markdown = $state('');
 	let parsing = $state(false);
@@ -10,6 +10,23 @@
 	let expandedLevels: Record<number, boolean> = $state({});
 	let expandedDomains: Record<string, boolean> = $state({});
 	let showJson = $state(false);
+
+	// Space selection
+	let spaceMode: 'new' | 'existing' = $state('new');
+	let customSpaceName = $state('');
+	let existingSpaceId = $state('');
+	let spaces: { id: string; name: string }[] = $state([]);
+	let loadingSpaces = $state(false);
+
+	async function loadSpaces() {
+		loadingSpaces = true;
+		try {
+			const res = await fetch('/api/clickup/spaces');
+			const data = await res.json();
+			if (data.ok) spaces = data.spaces;
+		} catch {}
+		loadingSpaces = false;
+	}
 
 	let totalTasks = $derived(
 		parsed?.levels?.reduce((sum: number, l: any) =>
@@ -56,7 +73,11 @@
 			const res = await fetch('/api/clickup/export', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ data: parsed })
+				body: JSON.stringify({
+				data: parsed,
+				spaceId: spaceMode === 'existing' ? existingSpaceId : undefined,
+				spaceName: spaceMode === 'new' && customSpaceName ? customSpaceName : undefined
+			})
 			});
 			const data = await res.json();
 			if (data.ok) {
@@ -165,12 +186,12 @@
 	{#if parsed}
 		<div class="bg-white rounded-xl border border-gray-200 shadow-sm">
 			<!-- Header -->
-			<div class="p-5 border-b border-gray-100 flex items-center justify-between">
-				<div>
-					<h3 class="font-bold text-gray-900 text-lg">{parsed.projectName}</h3>
-					<p class="text-sm text-gray-500 mt-0.5">{totalDomains} domínios, {totalTasks} tasks</p>
-				</div>
-				<div class="flex gap-2">
+			<div class="p-5 border-b border-gray-100">
+				<div class="flex items-center justify-between mb-4">
+					<div>
+						<h3 class="font-bold text-gray-900 text-lg">{parsed.projectName}</h3>
+						<p class="text-sm text-gray-500 mt-0.5">{totalDomains} domínios, {totalTasks} tasks</p>
+					</div>
 					<button
 						onclick={clear}
 						class="px-4 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm font-medium hover:bg-gray-50 transition-colors flex items-center gap-2"
@@ -178,17 +199,66 @@
 						<Trash2 class="w-4 h-4" />
 						Limpar
 					</button>
+				</div>
+
+				<!-- Space Selection -->
+				<div class="bg-gray-50 rounded-lg p-4 space-y-3">
+					<p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Destino no ClickUp</p>
+					<div class="flex gap-2">
+						<button
+							onclick={() => spaceMode = 'new'}
+							class="px-3 py-1.5 rounded-md text-xs font-medium transition-colors {spaceMode === 'new' ? 'bg-purple-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'} flex items-center gap-1.5"
+						>
+							<Plus class="w-3 h-3" />
+							Novo Space
+						</button>
+						<button
+							onclick={() => { spaceMode = 'existing'; if (spaces.length === 0) loadSpaces(); }}
+							class="px-3 py-1.5 rounded-md text-xs font-medium transition-colors {spaceMode === 'existing' ? 'bg-purple-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'} flex items-center gap-1.5"
+						>
+							<FolderSync class="w-3 h-3" />
+							Space Existente
+						</button>
+					</div>
+
+					{#if spaceMode === 'new'}
+						<input
+							type="text"
+							bind:value={customSpaceName}
+							placeholder={parsed.projectName}
+							class="w-full px-3 py-2 rounded-md border border-gray-300 text-sm focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none"
+						/>
+						<p class="text-xs text-gray-400">Deixe vazio para usar "{parsed.projectName}"</p>
+					{:else}
+						{#if loadingSpaces}
+							<div class="flex items-center gap-2 text-sm text-gray-500">
+								<Loader2 class="w-4 h-4 animate-spin" /> Carregando spaces...
+							</div>
+						{:else}
+							<select bind:value={existingSpaceId} class="w-full px-3 py-2 rounded-md border border-gray-300 text-sm focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none">
+								<option value="">Selecione um Space...</option>
+								{#each spaces as space}
+									<option value={space.id}>{space.name}</option>
+								{/each}
+							</select>
+							<p class="text-xs text-gray-400">Os domínios serão adicionados como Folders dentro deste Space</p>
+						{/if}
+					{/if}
+				</div>
+
+				<!-- Export Button -->
+				<div class="mt-4">
 					<button
 						onclick={exportToClickUp}
-						disabled={exporting}
-						class="px-5 py-2 rounded-lg bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+						disabled={exporting || (spaceMode === 'existing' && !existingSpaceId)}
+						class="px-5 py-2.5 rounded-lg bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
 					>
 						{#if exporting}
 							<Loader2 class="w-4 h-4 animate-spin" />
 							Exportando...
 						{:else}
 							<Send class="w-4 h-4" />
-							Exportar para ClickUp
+							{spaceMode === 'new' ? 'Criar Space e Exportar' : 'Adicionar ao Space'}
 						{/if}
 					</button>
 				</div>

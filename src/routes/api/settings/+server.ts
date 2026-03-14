@@ -1,16 +1,24 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { env } from '$env/dynamic/private';
-import { writeFileSync, readFileSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
+import { DEFAULT_SYSTEM_PROMPT } from '$lib/agent-prompt';
 
 export const GET: RequestHandler = async () => {
+	const promptFile = resolve('agent-prompt.md');
+	let agentPrompt = DEFAULT_SYSTEM_PROMPT;
+	if (existsSync(promptFile)) {
+		agentPrompt = readFileSync(promptFile, 'utf-8');
+	}
+
 	return json({
 		clickupToken: env.CLICKUP_API_TOKEN ? '••••' + env.CLICKUP_API_TOKEN.slice(-8) : '',
 		anthropicKey: env.ANTHROPIC_API_KEY ? '••••' + env.ANTHROPIC_API_KEY.slice(-8) : '',
 		teamId: env.CLICKUP_TEAM_ID || '',
 		hasClickup: !!env.CLICKUP_API_TOKEN,
-		hasAnthropic: !!env.ANTHROPIC_API_KEY
+		hasAnthropic: !!env.ANTHROPIC_API_KEY,
+		agentPrompt
 	});
 };
 

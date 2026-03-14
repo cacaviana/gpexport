@@ -35,24 +35,32 @@ export const POST: RequestHandler = async ({ request }) => {
 	if (!token) return json({ ok: false, error: 'No ClickUp API token' }, { status: 400 });
 	if (!teamId) return json({ ok: false, error: 'No Team ID configured' }, { status: 400 });
 
-	const { data } = await request.json();
+	const { data, spaceId: existingSpaceId, spaceName: customSpaceName } = await request.json();
 	if (!data?.projectName || !data?.levels) {
 		return json({ ok: false, error: 'Invalid data structure' }, { status: 400 });
 	}
 
 	const log: string[] = [];
 	try {
-		// 1. Create Space (= Project)
-		const space = await clickupFetch(`/team/${teamId}/space`, 'POST', {
-			name: data.projectName,
-			multiple_assignees: true,
-			features: {
-				due_dates: { enabled: true, start_date: false, remap_due_dates: false, remap_closed_due_date: false },
-				checklists: { enabled: true },
-				tags: { enabled: true }
-			}
-		});
-		log.push(`✅ Space "${data.projectName}" criado (id: ${space.id})`);
+		// 1. Create or reuse Space
+		let spaceId: string;
+		if (existingSpaceId) {
+			spaceId = existingSpaceId;
+			log.push(`📌 Usando Space existente (id: ${spaceId})`);
+		} else {
+			const spaceName = customSpaceName || data.projectName;
+			const space = await clickupFetch(`/team/${teamId}/space`, 'POST', {
+				name: spaceName,
+				multiple_assignees: true,
+				features: {
+					due_dates: { enabled: true, start_date: false, remap_due_dates: false, remap_closed_due_date: false },
+					checklists: { enabled: true },
+					tags: { enabled: true }
+				}
+			});
+			spaceId = space.id;
+			log.push(`✅ Space "${spaceName}" criado (id: ${spaceId})`);
+		}
 
 		// 2. Flatten: collect all domains across levels (domain-oriented, not level-oriented)
 		// Each domain becomes a Folder (dossier). Level becomes a tag on the task.
@@ -69,7 +77,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		for (const level of data.levels) {
 			const tagName = `Nível ${level.level}`;
 			try {
-				await clickupFetch(`/space/${space.id}/tag`, 'POST', {
+				await clickupFetch(`/space/${spaceId}/tag`, 'POST', {
 					tag: { name: tagName, tag_bg: tagColors[level.level - 1] || '#6b7280', tag_fg: '#ffffff' }
 				});
 				levelTags[level.level] = tagName;
@@ -82,7 +90,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		// 4. For each domain: create Folder (= dossier)
 		for (const { domain, levelNum, levelName } of allDomains) {
 			const folderName = domain.name;
-			const folder = await clickupFetch(`/space/${space.id}/folder`, 'POST', {
+			const folder = await clickupFetch(`/space/${spaceId}/folder`, 'POST', {
 				name: folderName
 			});
 			log.push(`📂 Domínio "${folderName}" criado`);

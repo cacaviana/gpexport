@@ -1,8 +1,19 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { env } from '$env/dynamic/private';
+import { readFileSync, existsSync } from 'fs';
+import { resolve } from 'path';
+import { DEFAULT_SYSTEM_PROMPT } from '$lib/agent-prompt';
 
-const SYSTEM_PROMPT = `Você é um parser de documentos de gestão de projetos IT Valley (Agente 08-b).
+function getSystemPrompt(): string {
+	const promptFile = resolve('agent-prompt.md');
+	if (existsSync(promptFile)) {
+		return readFileSync(promptFile, 'utf-8');
+	}
+	return DEFAULT_SYSTEM_PROMPT;
+}
+
+const _UNUSED_PROMPT = `Você é um parser de documentos de gestão de projetos IT Valley (Agente 08-b).
 
 Receba um documento Markdown no formato do Agente 08-b e extraia a estrutura completa.
 
@@ -72,7 +83,7 @@ export const POST: RequestHandler = async ({ request }) => {
 				messages: [
 					{ role: 'user', content: `Parse este documento de gestão de projeto 08-b e retorne o JSON estruturado:\n\n${markdown}` }
 				],
-				system: SYSTEM_PROMPT
+				system: getSystemPrompt()
 			})
 		});
 
