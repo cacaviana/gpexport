@@ -43,30 +43,140 @@ Space: Sistemas IT Valley              ← escopo gerenciável (agrupa projetos)
     └── ...
 ```
 
-| ClickUp | PMBOK/EAP | IT Valley | Regra de Nome |
-|---------|-----------|-----------|---------------|
-| **Space** | Escopo gerenciável | Área | "Sistemas IT Valley" |
-| **Folder** | Projeto | Sistema | Nome do sistema: "TCC — Traffic Command Center" |
-| **List** | Entregável (substantivo) | Domínio | "Domínio {Nome}" — ex: "Domínio Produto" |
-| **Task** | Ação (verbo) | Dev Feature | "Verbo Objeto (DTORequest)" — ex: "Criar Produto (CriarProdutoRequest)" |
-| **Checklist** | Camadas | Back/Front/QA | ☐ Back ☐ Front ☐ QA |
-| **Tag** | Nível de prioridade | Ordem técnica | 🏷️ Nível 1, Nível 2... |
-| **Status** | Progresso | Usar os existentes do ClickUp | A FAZER, EM ANDAMENTO, FEITO, BLOQUEADO |
+### Resumo da Hierarquia
+
+| Nível | ClickUp | PMBOK/EAP | IT Valley | Regra de Nome |
+|-------|---------|-----------|-----------|---------------|
+| 1 | **Space** | Escopo gerenciável | Área | "Sistemas IT Valley" |
+| 2 | **Folder** | Projeto | Sistema | Nome do sistema: "TCC — Traffic Command Center" |
+| 3 | **List** | Entregável (substantivo) | Domínio | "Domínio {Nome}" — ex: "Domínio Produto" |
+| 4 | **Task** | Ação (verbo) | Dev Feature | "Verbo Objeto (DTORequest)" — ex: "Criar Produto (CriarProdutoRequest)" |
+| — | **Checklist** | Camadas | Back/Front/QA | ☐ Back ☐ Front ☐ QA |
+| — | **Tag** | Nível de prioridade | Ordem técnica | Nivel 1, Nivel 2... |
 
 ### Regras de Nomenclatura
 
 **Lists (entregáveis):** Sempre começam com "Domínio" + nome do domínio
-- ✅ "Domínio Produto", "Domínio Campanha", "Domínio Dashboard"
-- ❌ "Produto", "CRUD Produtos", "Módulo de Produtos"
+- "Domínio Produto", "Domínio Campanha", "Domínio Dashboard"
+- NAO usar: "Produto", "CRUD Produtos", "Módulo de Produtos"
 
 **Tasks (ações):** Nome legível para GP + nome do DTO entre parênteses para o dev
-- ✅ "Criar Produto (CriarProdutoRequest)"
-- ✅ "Listar Campanhas (ListarCampanhasRequest)"
-- ❌ "CriarProduto" (GP não entende)
-- ❌ "Criar Produto" (dev não sabe qual DTO)
+- "Criar Produto (CriarProdutoRequest)"
+- "Listar Campanhas (ListarCampanhasRequest)"
+- NAO usar: "CriarProduto" (GP não entende) ou "Criar Produto" sem DTO (dev não sabe qual DTO)
 
-**Status:** Usar APENAS os status nativos do ClickUp — NÃO criar status customizados
-- Use: to do, in progress, complete (os que já existem no workspace)
+---
+
+## Workflow de Status (CUSTOMIZADO por List)
+
+### Fluxo completo
+
+```
+A FAZER → FEITO IA → REVISÃO DEV → FEITO DEV → QA → FINALIZADA
+```
+
+### Definição de cada status
+
+| Status | Significado | Quem move | Quando |
+|--------|-------------|-----------|--------|
+| **A FAZER** | Task ainda não iniciada | — | Estado inicial de toda task |
+| **FEITO IA** | IA completou a implementação desta task | IA (automático) | Quando a IA finaliza o código/artefato da task |
+| **REVISÃO DEV** | Dev humano está revisando o que a IA fez | Dev | Dev pega para revisar |
+| **FEITO DEV** | Dev revisou, ajustou e aprovou | Dev | Dev terminou a revisão e eventuais correções |
+| **QA** | Em teste de qualidade | QA | Task entra na fila de testes |
+| **FINALIZADA** | Task concluída e validada | QA / GP | Todos os testes passaram |
+
+### Tipos de status na API ClickUp
+
+Cada status precisa de um `type` na API. Os tipos válidos são:
+
+| Status | type (API) | Cor sugerida |
+|--------|-----------|-------------|
+| A FAZER | `"open"` | `"#d3d3d3"` (cinza) |
+| FEITO IA | `"custom"` | `"#6b5bff"` (roxo) |
+| REVISÃO DEV | `"custom"` | `"#f9a825"` (amarelo) |
+| FEITO DEV | `"custom"` | `"#2196f3"` (azul) |
+| QA | `"custom"` | `"#ff9800"` (laranja) |
+| FINALIZADA | `"closed"` | `"#4caf50"` (verde) |
+
+### Regra: status customizados por List
+
+Cada List (Domínio) no ClickUp **DEVE** ter seus próprios status customizados. Isso significa:
+
+- `override_statuses: true` na criação da List
+- `type: "custom"` para os status intermediários
+- O primeiro status DEVE ter `type: "open"`
+- O último status DEVE ter `type: "closed"`
+
+**NAO usar status nativos/padrão do ClickUp.** Cada List recebe o workflow completo acima.
+
+---
+
+## Regra de Status para Tasks geradas pela IA
+
+Quando a IA gera o documento de gestão e **já implementou** o código de uma task (ou seja, os artefatos já existem no repositório), a task DEVE ser marcada com status **"FEITO IA"** — nunca "complete", "done" ou "FINALIZADA".
+
+Isso sinaliza ao dev humano que:
+1. O código existe e foi gerado por IA
+2. Precisa de revisão humana antes de ser considerado pronto
+3. O fluxo correto é: FEITO IA → REVISÃO DEV → FEITO DEV → QA → FINALIZADA
+
+Exemplo prático:
+- Task "Criar Produto (CriarProdutoRequest)" — se a IA já gerou o model, DTO, service e router → status = **FEITO IA**
+- Task "Criar Dashboard (CriarDashboardRequest)" — ainda não implementada → status = **A FAZER**
+
+---
+
+## Como o GPExport cria os status via API
+
+O sistema **GPExport** lê o documento Markdown gerado por este agente e cria a estrutura no ClickUp via API REST.
+
+### Fluxo do GPExport
+
+1. **Cria/localiza o Space** — "Sistemas IT Valley"
+2. **Cria/localiza o Folder** — nome do projeto (ex: "TCC — Traffic Command Center")
+3. **Cria cada List com status customizados** — para cada domínio, chama `POST /list` com `override_statuses: true`
+4. **Cria as Tasks** dentro de cada List, com o status correto (A FAZER ou FEITO IA)
+
+### Exemplo: criação de List com status customizados (API ClickUp)
+
+```json
+POST https://api.clickup.com/api/v2/folder/{folder_id}/list
+
+{
+  "name": "Domínio Produto",
+  "override_statuses": true,
+  "statuses": [
+    { "status": "A FAZER",      "type": "open",   "color": "#d3d3d3" },
+    { "status": "FEITO IA",     "type": "custom", "color": "#6b5bff" },
+    { "status": "REVISÃO DEV",  "type": "custom", "color": "#f9a825" },
+    { "status": "FEITO DEV",    "type": "custom", "color": "#2196f3" },
+    { "status": "QA",           "type": "custom", "color": "#ff9800" },
+    { "status": "FINALIZADA",   "type": "closed", "color": "#4caf50" }
+  ]
+}
+```
+
+### Exemplo: criação de Task com status
+
+```json
+POST https://api.clickup.com/api/v2/list/{list_id}/task
+
+{
+  "name": "Criar Produto (CriarProdutoRequest)",
+  "description": "Cadastrar novo produto no sistema...",
+  "status": "FEITO IA"
+}
+```
+
+Se a task ainda nao foi implementada:
+```json
+{
+  "name": "Criar Dashboard (CriarDashboardRequest)",
+  "description": "...",
+  "status": "A FAZER"
+}
+```
 
 ---
 
@@ -83,6 +193,7 @@ Space: Sistemas IT Valley              ← escopo gerenciável (agrupa projetos)
 **Total de domínios (Lists):** [N]
 **Total de dev features (Tasks):** [N]
 **Níveis de implementação:** [N]
+**Workflow de status:** A FAZER → FEITO IA → REVISÃO DEV → FEITO DEV → QA → FINALIZADA
 ```
 
 ### 2. MAPA DE DOMÍNIOS
@@ -113,15 +224,16 @@ Para CADA domínio:
 **O que é:** Cadastro e gestão dos produtos/cursos que a empresa vende. Sem este domínio pronto, Funil e Campanha ficam bloqueados.
 **Depende de:** nenhum (Nível 1)
 **Libera:** Domínio Funil, Domínio Campanha, Domínio Dashboard
+**Status customizados:** A FAZER | FEITO IA | REVISÃO DEV | FEITO DEV | QA | FINALIZADA
 
 ### Tasks (Dev Features)
 
 | # | Task no ClickUp | Descrição GP | Critérios de Aceite | Depende de | Status |
 |---|----------------|-------------|---------------------|------------|--------|
-| 1 | Criar Produto (CriarProdutoRequest) | Cadastrar novo produto no sistema | 1. Produto salvo no banco ✓ 2. Retorna com ID ✓ 3. Erro se faltar campo | — | A FAZER |
-| 2 | Listar Produtos (ListarProdutosRequest) | Mostrar todos os produtos | 1. Retorna lista completa ✓ 2. Funciona com filtros | Task 1 | A FAZER |
-| 3 | Buscar Produto (BuscarProdutoRequest) | Buscar produto por ID | 1. Retorna produto ✓ 2. Erro 404 se não existir | Task 1 | A FAZER |
-| 4 | Atualizar Produto (AtualizarProdutoRequest) | Editar dados do produto | 1. Dados atualizados ✓ 2. Retorna produto atualizado | Task 3 | A FAZER |
+| 1 | Criar Produto (CriarProdutoRequest) | Cadastrar novo produto no sistema | 1. Produto salvo no banco 2. Retorna com ID 3. Erro se faltar campo | — | FEITO IA |
+| 2 | Listar Produtos (ListarProdutosRequest) | Mostrar todos os produtos | 1. Retorna lista completa 2. Funciona com filtros | Task 1 | FEITO IA |
+| 3 | Buscar Produto (BuscarProdutoRequest) | Buscar produto por ID | 1. Retorna produto 2. Erro 404 se não existir | Task 1 | A FAZER |
+| 4 | Atualizar Produto (AtualizarProdutoRequest) | Editar dados do produto | 1. Dados atualizados 2. Retorna produto atualizado | Task 3 | A FAZER |
 
 ### Arquivos do Domínio
 | Arquivo | Criado na Task |
@@ -132,37 +244,28 @@ Para CADA domínio:
 | routers/produto.py | Criar Produto |
 ```
 
+**Regra de Status no detalhamento:**
+- Se a IA JÁ IMPLEMENTOU os artefatos da task → status = **FEITO IA**
+- Se a task AINDA NÃO foi implementada → status = **A FAZER**
+- Nunca usar "complete", "done", "FEITO" ou "EM ANDAMENTO" no documento gerado
+
 ---
 
 ## Regras de Descrição (GP-Friendly)
 
-### ❌ NÃO faça assim:
+### NAO faça assim:
 - "CRUD de produtos com SQLAlchemy"
 - "POST endpoint com Pydantic validation"
 
-### ✅ FAÇA assim:
+### FAÇA assim:
 - "Cadastrar novo produto no sistema com nome, preço e tipo"
 - "Mostrar todos os produtos cadastrados"
 
 ### Critérios de Aceite:
 1. Devem ser **verificáveis** por alguém não-técnico
-2. Formato checklist: "1. [resultado esperado] ✓"
+2. Formato checklist: "1. [resultado esperado] 2. [resultado] ..."
 3. Incluir cenários de erro
 4. Descrever resultado visual quando possível
-
----
-
-## Legenda de Status
-
-Usar APENAS status nativos do ClickUp:
-
-| Doc | ClickUp Status |
-|-----|---------------|
-| A FAZER | to do |
-| EM ANDAMENTO | in progress |
-| FEITO | complete |
-
-**NÃO criar status customizados.** Usar os que já existem no workspace.
 
 ---
 
@@ -175,5 +278,10 @@ Usar APENAS status nativos do ClickUp:
 - [ ] Dependências entre domínios mapeadas
 - [ ] Dependências entre tasks dentro do domínio mapeadas
 - [ ] Tabela de arquivos por domínio completa
-- [ ] Status usando apenas nativos do ClickUp
-- [ ] Documento segue hierarquia: Space → Folder (projeto) → List (domínio) → Task (ação)
+- [ ] Documento segue hierarquia: Space (escopo) → Folder (projeto) → List (domínio) → Task (ação)
+- [ ] Workflow de status definido: A FAZER → FEITO IA → REVISÃO DEV → FEITO DEV → QA → FINALIZADA
+- [ ] Cada List usa `override_statuses: true` com status customizados
+- [ ] Tasks já implementadas pela IA marcadas como "FEITO IA"
+- [ ] Tasks pendentes marcadas como "A FAZER"
+- [ ] Nenhum status nativo do ClickUp usado (apenas o workflow customizado)
+- [ ] Status types corretos: open (A FAZER), custom (intermediários), closed (FINALIZADA)
