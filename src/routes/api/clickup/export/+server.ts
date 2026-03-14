@@ -29,6 +29,78 @@ const STATUS_MAP: Record<string, string> = {
 	review: 'in review'
 };
 
+function buildDomainDescription(domain: any, levelNum: number, levelName: string): string {
+	const lines: string[] = [];
+
+	if (domain.domainDescription) {
+		lines.push(domain.domainDescription);
+		lines.push('');
+	}
+
+	lines.push(`📊 Nível: ${levelNum} — ${levelName}`);
+	lines.push(`📦 Total: ${domain.devFeatures?.length || 0} dev features`);
+
+	if (domain.dependsOn?.length > 0) {
+		lines.push(`🔗 Depende de: ${domain.dependsOn.join(', ')}`);
+	}
+
+	if (domain.implementationOrder) {
+		lines.push('');
+		lines.push('📋 Ordem de implementação:');
+		lines.push(domain.implementationOrder);
+	}
+
+	if (domain.files?.length > 0) {
+		lines.push('');
+		lines.push('📁 Arquivos do domínio:');
+		for (const f of domain.files) {
+			lines.push(`  • ${f}`);
+		}
+	}
+
+	return lines.join('\n');
+}
+
+function buildTaskDescription(feature: any, domain: any, levelNum: number, levelName: string): string {
+	const sections: string[] = [];
+
+	// Main description
+	if (feature.description) {
+		sections.push(`📌 ${feature.description}`);
+	}
+
+	// Acceptance criteria
+	if (feature.acceptance) {
+		sections.push('');
+		sections.push('✅ Critérios de Aceite:');
+		sections.push(feature.acceptance);
+	}
+
+	// Files
+	if (feature.files?.length > 0) {
+		sections.push('');
+		sections.push('📁 Arquivos:');
+		for (const f of feature.files) {
+			sections.push(`  • ${f}`);
+		}
+	}
+
+	// Metadata
+	sections.push('');
+	sections.push('---');
+	sections.push(`🏷️ Nível: ${levelNum} — ${levelName}`);
+	sections.push(`📂 Domínio: ${domain.name}`);
+
+	if (domain.dependsOn?.length > 0) {
+		sections.push(`🔗 Domínio depende de: ${domain.dependsOn.join(', ')}`);
+	}
+	if (feature.dependsOn?.length > 0) {
+		sections.push(`⛓️ Dev feature depende de: ${feature.dependsOn.join(', ')}`);
+	}
+
+	return sections.join('\n');
+}
+
 export const POST: RequestHandler = async ({ request }) => {
 	const token = env.CLICKUP_API_TOKEN;
 	const teamId = env.CLICKUP_TEAM_ID;
@@ -62,8 +134,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			log.push(`✅ Space "${spaceName}" criado (id: ${spaceId})`);
 		}
 
-		// 2. Flatten: collect all domains across levels (domain-oriented, not level-oriented)
-		// Each domain becomes a Folder (dossier). Level becomes a tag on the task.
+		// 2. Flatten: collect all domains across levels
 		const allDomains: { domain: any; levelNum: number; levelName: string }[] = [];
 		for (const level of data.levels) {
 			for (const domain of level.domains) {
@@ -71,7 +142,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			}
 		}
 
-		// 3. Create tags for levels on the space
+		// 3. Create tags for levels
 		const levelTags: Record<number, string> = {};
 		const tagColors = ['#7c3aed', '#2563eb', '#059669', '#d97706', '#dc2626'];
 		for (const level of data.levels) {
@@ -87,7 +158,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			}
 		}
 
-		// 4. For each domain: create Folder (= dossier)
+		// 4. For each domain: create Folder
 		for (const { domain, levelNum, levelName } of allDomains) {
 			const folderName = domain.name;
 			const folder = await clickupFetch(`/space/${spaceId}/folder`, 'POST', {
@@ -95,28 +166,18 @@ export const POST: RequestHandler = async ({ request }) => {
 			});
 			log.push(`📂 Domínio "${folderName}" criado`);
 
-			// 5. Create a single List "Backlog" inside the Folder
+			// 5. Create List "Backlog" with domain description as content
 			const featureCount = domain.devFeatures?.length || domain.totalFeatures || 0;
+			const listDescription = buildDomainDescription(domain, levelNum, levelName);
 			const list = await clickupFetch(`/folder/${folder.id}/list`, 'POST', {
-				name: `Backlog (${featureCount} tasks)`
+				name: `Backlog (${featureCount} tasks)`,
+				content: listDescription
 			});
-			log.push(`  📋 List "Backlog" criado`);
+			log.push(`  📋 Backlog criado`);
 
-			// 6. For each dev feature: create Task
+			// 6. For each dev feature: create Task with rich description
 			for (const feature of domain.devFeatures) {
-				// Build description with metadata
-				let description = feature.description || '';
-				const meta: string[] = [];
-				meta.push(`Nível: ${levelNum} — ${levelName}`);
-				if (domain.dependsOn && domain.dependsOn.length > 0) {
-					meta.push(`Domínio depende de: ${domain.dependsOn.join(', ')}`);
-				}
-				if (feature.dependsOn && feature.dependsOn.length > 0) {
-					meta.push(`Dev feature depende de: ${feature.dependsOn.join(', ')}`);
-				}
-				if (meta.length > 0) {
-					description += '\n\n---\n' + meta.join('\n');
-				}
+				const description = buildTaskDescription(feature, domain, levelNum, levelName);
 
 				const taskBody: any = {
 					name: feature.name,
@@ -142,6 +203,19 @@ export const POST: RequestHandler = async ({ request }) => {
 						name: layer.name,
 						resolved: layer.status === 'done'
 					});
+				}
+
+				// 8. If feature has files, create a second checklist "Arquivos"
+				if (feature.files?.length > 0) {
+					const filesChecklist = await clickupFetch(`/task/${task.id}/checklist`, 'POST', {
+						name: 'Arquivos'
+					});
+					for (const file of feature.files) {
+						await clickupFetch(`/checklist/${filesChecklist.checklist.id}/checklist_item`, 'POST', {
+							name: file,
+							resolved: false
+						});
+					}
 				}
 
 				const statusEmoji = feature.statusBack === 'done' ? '✅' : feature.statusBack === 'blocked' ? '🔴' : '⬜';
