@@ -98,7 +98,16 @@ export const POST: RequestHandler = async ({ request }) => {
 		// Extract JSON from response (handle if wrapped in markdown code blocks)
 		let jsonStr = content;
 		const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-		if (jsonMatch) jsonStr = jsonMatch[1];
+		if (jsonMatch) {
+			jsonStr = jsonMatch[1];
+		} else {
+			// Fallback: find first { and last }
+			const start = content.indexOf('{');
+			const end = content.lastIndexOf('}');
+			if (start !== -1 && end !== -1) {
+				jsonStr = content.substring(start, end + 1);
+			}
+		}
 
 		const parsed = JSON.parse(jsonStr.trim());
 		return json({ ok: true, data: parsed });
